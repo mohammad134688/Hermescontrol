@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1a1a2e">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#16213e"
+        android:elevation="4dp">
+
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="#16213e"
+            app:title="Hermes Control"
+            app:titleTextColor="#ffffff"
+            android:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:layout_gravity="end"
+                android:gravity="center">
+
+                <ImageButton
+                    android:id="@+id/controlPanelToggle"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@android:drawable/ic_menu_manage"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Controls"
+                    android:onClick="toggleControlPanel"
+                    android:padding="8dp" />
+
+                <ImageButton
+                    android:id="@+id/refreshButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@android:drawable/ic_menu_rotate"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Refresh"
+                    android:onClick="connectWebUi"
+                    android:padding="8dp" />
+
+            </LinearLayout>
+
+        </androidx.appcompat.widget.Toolbar>
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:layout_marginTop="?attr/actionBarSize"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- URL input bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="8dp"
+            android:background="#1a1a3e">
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                app:endIconMode="clear_text"
+                android:hint="Web UI URL">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/webUiUrlInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="http://127.0.0.1:9119"
+                    android:textColor="#ffffff"
+                    android:textColorHint="#888888"
+                    android:inputType="textUri" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/connectBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Connect"
+                android:onClick="connectWebUi"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_marginStart="8dp" />
+
+        </LinearLayout>
+
+        <!-- MCP Status -->
+        <TextView
+            android:id="@+id/mcpStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="6dp 12dp"
+            android:textSize="12sp"
+            android:textColor="#88ff88"
+            android:background="#0a0a1e"
+            android:text="MCP starting..." />
+
+        <!-- WebView -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <WebView
+                android:id="@+id/webView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <ProgressBar
+                android:id="@+id/loadingView"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="center"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+        <!-- Collapsible Control Panel -->
+        <LinearLayout
+            android:id="@+id/controlPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:background="#16213e"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Quick Controls"
+                android:textColor="#ffffff"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:paddingBottom="8dp" />
+
+            <!-- Brightness -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/brightnessValueText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="☀️ 128"
+                    android:textColor="#ffffff"
+                    android:textSize="14sp"
+                    android:minWidth="60dp" />
+
+                <SeekBar
+                    android:id="@+id/brightnessSlider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="255"
+                    android:layout_marginHorizontal="8dp" />
+
+            </LinearLayout>
+
+            <!-- WiFi + Torch -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="4dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="WiFi"
+                    android:textColor="#ffffff"
+                    android:textSize="14sp" />
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/wifiSwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Torch"
+                    android:textColor="#ffffff"
+                    android:textSize="14sp"
+                    android:gravity="center" />
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/torchSwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
