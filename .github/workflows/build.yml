@@ -22,7 +22,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq gradle 2>/dev/null || true
-          gradle wrapper --gradle-version 8.7
+          gradle wrapper --gradle-version 8.9
 
       - name: Grant execute permission
         run: chmod +x gradlew
