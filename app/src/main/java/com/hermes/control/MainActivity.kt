@@ -5,26 +5,18 @@ import android.content.Intent
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
-import android.provider.Settings
 import android.view.View
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.switchmaterial.SwitchMaterial
-import dev.rikka.shizuku.Shizuku
-import dev.rikka.shizuku.ShizukuProvider
+import com.google.android.material.textfield.TextInputEditText
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.InputStreamReader
 
 class MainActivity : AppCompatActivity() {
 
@@ -32,15 +24,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var loadingView: View
     private lateinit var controlPanel: View
     private lateinit var mcpStatusText: android.widget.TextView
-    private lateinit var webUiUrlInput: com.google.android.material.textfield.TextInputEditText
+    private lateinit var webUiUrlInput: TextInputEditText
     private lateinit var brightnessSlider: android.widget.SeekBar
     private lateinit var brightnessValueText: android.widget.TextView
-    private lateinit var wifiSwitch: SwitchMaterial
-    private lateinit var torchSwitch: SwitchMaterial
+    private lateinit var wifiSwitch: android.widget.Switch
+    private lateinit var torchSwitch: android.widget.Switch
 
     private var mcpPort = 9199
     private var mcpServer: McpServer? = null
-    private var isShizukuReady = false
+    private val scope = CoroutineScope(Dispatchers.IO)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,9 +40,10 @@ class MainActivity : AppCompatActivity() {
 
         initViews()
         setupWebView()
-        setupShizuku()
         startMcpServer()
         setupControls()
+
+        mcpStatusText.text = "✅ MCP running on :$mcpPort"
     }
 
     private fun initViews() {
@@ -85,7 +78,6 @@ class MainActivity : AppCompatActivity() {
                     "AppleWebKit/537.36 HermesControl/1.0"
         }
 
-        // Enable dark mode for WebView content
         if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
             WebSettingsCompat.setForceDark(webView.settings,
                 WebSettingsCompat.FORCE_DARK_AUTO)
@@ -96,7 +88,6 @@ class MainActivity : AppCompatActivity() {
                 loadingView.visibility = View.GONE
             }
         }
-
         webView.webChromeClient = WebChromeClient()
     }
 
@@ -111,73 +102,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun toggleControlPanel(view: View) {
-        if (controlPanel.visibility == View.VISIBLE) {
-            controlPanel.visibility = View.GONE
-        } else {
-            controlPanel.visibility = View.VISIBLE
-        }
+        controlPanel.visibility = if (controlPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
     }
-
-    // ─── Shizuku ────────────────────────────────────────────────
-
-    private fun setupShizuku() {
-        if (!Shizuku.pingBinder()) {
-            mcpStatusText.text = "⚠️ Shizuku not running — install from lsposed.github.io"
-            return
-        }
-
-        Shizuku.addRequestPermissionResultListener { requestCode, grantResult ->
-            if (requestCode == 1001 && grantResult == 0) {
-                isShizukuReady = true
-                mcpStatusText.text = "✅ Shizuku ready (PID: ${android.os.Process.myPid()})"
-            }
-        }
-
-        if (Shizuku.isPreV11() || Shizuku.getVersion() < 13) {
-            mcpStatusText.text = "⚠️ Shizuku v13+ needed"
-            return
-        }
-
-        if (Shizuku.shouldShowRequestPermissionRationale()) {
-            MaterialAlertDialogBuilder(this)
-                .setTitle("Shizuku Permission")
-                .setMessage("This app needs Shizuku to control system settings")
-                .setPositiveButton("Grant") { _, _ -> grantShizuku() }
-                .setNegativeButton("Cancel", null)
-                .show()
-        } else {
-            grantShizuku()
-        }
-    }
-
-    private fun grantShizuku() {
-        try {
-            Shizuku.requestPermission(1001)
-            isShizukuReady = true
-            mcpStatusText.text = "✅ Shizuku ready"
-        } catch (e: Exception) {
-            mcpStatusText.text = "❌ Shizuku error: ${e.message}"
-        }
-    }
-
-    // ─── MCP Server ─────────────────────────────────────────────
 
     private fun startMcpServer() {
         mcpServer = McpServer(mcpPort, this)
         mcpServer?.start()
-        mcpStatusText.text = "✅ MCP running on :$mcpPort | ${if (isShizukuReady) "Shizuku OK" else "No Shizuku"}"
     }
 
-    fun getShizukuCommands(): McpCommands = McpCommands(this, isShizukuReady)
-
-    // ─── Quick Controls ─────────────────────────────────────────
-
     private fun setupControls() {
-        // Brightness slider
         brightnessSlider.max = 255
         try {
-            val current = Settings.System.getInt(contentResolver,
-                Settings.System.SCREEN_BRIGHTNESS)
+            val current = android.provider.Settings.System.getInt(contentResolver,
+                android.provider.Settings.System.SCREEN_BRIGHTNESS)
             brightnessSlider.progress = current
             brightnessValueText.text = "☀️ $current"
         } catch (_: Exception) {}
@@ -191,14 +128,12 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
         })
 
-        // WiFi
         val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         wifiSwitch.isChecked = wifiManager.isWifiEnabled
         wifiSwitch.setOnCheckedChangeListener { _, isChecked ->
             wifiManager.isWifiEnabled = isChecked
         }
 
-        // Torch
         torchSwitch.setOnCheckedChangeListener { _, isChecked ->
             setTorch(isChecked)
         }
@@ -206,16 +141,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun setBrightness(value: Int) {
         try {
-            Settings.System.putInt(contentResolver,
-                Settings.System.SCREEN_BRIGHTNESS, value)
+            android.provider.Settings.System.putInt(contentResolver,
+                android.provider.Settings.System.SCREEN_BRIGHTNESS, value)
         } catch (_: Exception) {}
     }
 
     private fun setTorch(on: Boolean) {
         try {
-            val camera = android.hardware.camera2.CameraManager::class.java
-                .getDeclaredConstructor(Context::class.java)
-                .newInstance(this)
             val cameraManager = getSystemService(Context.CAMERA_SERVICE)
                     as android.hardware.camera2.CameraManager
             val cameraId = cameraManager.cameraIdList[0]
@@ -224,8 +156,6 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Torch not available", Toast.LENGTH_SHORT).show()
         }
     }
-
-    // ─── Lifecycle ──────────────────────────────────────────────
 
     override fun onBackPressed() {
         if (webView.canGoBack()) {

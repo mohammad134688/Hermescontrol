@@ -7,48 +7,32 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
-import dev.rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
 /**
- * Shizuku-powered system commands that normal Android apps can't do.
- * Falls back to standard API when Shizuku is unavailable.
+ * System commands using standard Android APIs (no Shizuku needed).
+ * Falls back gracefully when permissions are missing.
  */
-class McpCommands(private val context: Context, private val hasShizuku: Boolean = false) {
-
-    // ─── Brightness ─────────────────────────────────────────────
+class McpCommands(private val context: Context) {
 
     fun getBrightness(): Result<Int> = runCatching {
         Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS)
     }
 
     fun setBrightness(value: Int): Result<Unit> = runCatching {
-        when {
-            hasShizuku -> shizukuRun("settings put system screen_brightness $value")
-            else -> Settings.System.putInt(context.contentResolver,
-                Settings.System.SCREEN_BRIGHTNESS, value.coerceIn(0, 255))
-        }
+        Settings.System.putInt(context.contentResolver,
+            Settings.System.SCREEN_BRIGHTNESS, value.coerceIn(0, 255))
     }
 
     fun setAutoBrightness(enabled: Boolean): Result<Unit> = runCatching {
         val mode = if (enabled) 1 else 0
-        when {
-            hasShizuku -> shizukuRun("settings put system screen_brightness_mode $mode")
-            else -> Settings.System.putInt(context.contentResolver,
-                Settings.System.SCREEN_BRIGHTNESS_MODE, mode)
-        }
-    }
-
-    // ─── Volume ─────────────────────────────────────────────────
-
-    fun getVolumes(): Result<String> = runCatching {
-        "Use termux-volume from MCP Python server — more reliable"
+        Settings.System.putInt(context.contentResolver,
+            Settings.System.SCREEN_BRIGHTNESS_MODE, mode)
     }
 
     fun setVolume(stream: String, level: Int): Result<Unit> = runCatching {
-        val audioManager = context.getSystemService(Context.AUDIO_SERVICE)
-                as android.media.AudioManager
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
         val streamMap = mapOf(
             "music" to android.media.AudioManager.STREAM_MUSIC,
             "ring" to android.media.AudioManager.STREAM_RING,
@@ -60,8 +44,6 @@ class McpCommands(private val context: Context, private val hasShizuku: Boolean 
         val audioStream = streamMap[stream.lowercase()] ?: android.media.AudioManager.STREAM_MUSIC
         audioManager.setStreamVolume(audioStream, level.coerceIn(0, 15), 0)
     }
-
-    // ─── WiFi ───────────────────────────────────────────────────
 
     fun setWifi(enabled: Boolean): Result<Unit> = runCatching {
         val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -77,11 +59,9 @@ Signal: ${info.rssi} dBm
 IP: ${info.ipAddress}"""
     }
 
-    // ─── Battery ────────────────────────────────────────────────
-
     fun getBatteryStatus(): Result<String> = runCatching {
         val intent = context.registerReceiver(null,
-            android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            Intent(Intent.ACTION_BATTERY_CHANGED))
         val level = intent?.getIntExtra("level", -1) ?: -1
         val scale = intent?.getIntExtra("scale", -1) ?: -1
         val plugged = intent?.getIntExtra("plugged", 0) ?: 0
@@ -91,16 +71,11 @@ IP: ${info.ipAddress}"""
 Charging: $charging"""
     }
 
-    // ─── Torch ──────────────────────────────────────────────────
-
     fun setTorch(on: Boolean): Result<Unit> = runCatching {
-        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE)
-                as android.hardware.camera2.CameraManager
+        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
         val cameraId = cameraManager.cameraIdList[0]
         cameraManager.setTorchMode(cameraId, on)
     }
-
-    // ─── Notification ───────────────────────────────────────────
 
     fun sendNotification(title: String, content: String): Result<Unit> = runCatching {
         val channelId = "hermes_control"
@@ -108,8 +83,7 @@ Charging: $charging"""
             val channel = android.app.NotificationChannel(
                 channelId, "Hermes Control",
                 android.app.NotificationManager.IMPORTANCE_HIGH)
-            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
-                    as android.app.NotificationManager
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             nm.createNotificationChannel(channel)
         }
         val notification = android.app.Notification.Builder(context, channelId)
@@ -118,19 +92,15 @@ Charging: $charging"""
             .setContentText(content)
             .setAutoCancel(true)
             .build()
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
-                as android.app.NotificationManager
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         nm.notify(System.currentTimeMillis().toInt(), notification)
     }
-
-    // ─── App Launch ─────────────────────────────────────────────
 
     fun launchApp(packageName: String): Result<Unit> = runCatching {
         val intent = context.packageManager.getLaunchIntentForPackage(packageName)
         if (intent != null) {
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } else {
-            // Try opening Play Store
             try {
                 context.startActivity(Intent(Intent.ACTION_VIEW,
                     Uri.parse("market://details?id=$packageName"))
@@ -141,31 +111,5 @@ Charging: $charging"""
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }
-    }
-
-    // ─── Reboot (Shizuku only) ──────────────────────────────────
-
-    fun reboot(): Result<Unit> = runCatching {
-        if (!hasShizuku) throw SecurityException("Reboot requires Shizuku")
-        shizukuRun("reboot")
-    }
-
-    // ─── Shizuku Shell ──────────────────────────────────────────
-
-    fun shizukuShell(command: String): Result<String> = runCatching {
-        if (!hasShizuku) throw SecurityException("Shizuku not available")
-        shizukuRun(command)
-    }
-
-    private fun shizukuRun(command: String): String {
-        val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
-        val reader = BufferedReader(InputStreamReader(process.inputStream))
-        val errorReader = BufferedReader(InputStreamReader(process.errorStream))
-        val output = reader.readText().trim()
-        val error = errorReader.readText().trim()
-        process.waitFor()
-        if (output.isNotEmpty()) return output
-        if (error.isNotEmpty()) throw RuntimeException(error)
-        return "OK"
     }
 }

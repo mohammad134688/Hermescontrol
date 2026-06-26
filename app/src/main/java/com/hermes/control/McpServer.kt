@@ -179,17 +179,22 @@ class McpServer(private val port: Int, private val context: Context) {
             "torch_on"            -> resultOf("success", cmds.setTorch(true))
             "torch_off"           -> resultOf("success", cmds.setTorch(false))
             "notify"              -> resultOf("sent", cmds.sendNotification(args.optString("title", ""), args.optString("content", "")))
-            "screenshot"          -> mapResult(Result.failure(Exception("Use termux-screenshot via MCP python server")))
+            "screenshot"          -> resultMap("error", "Use termux-screenshot via MCP python server")
             "app_launch"          -> resultOf("success", cmds.launchApp(args.optString("package", "")))
-            "app_list"            -> mapResult(Result.success("Use pm list packages via adb/shizuku shell"))
-            "reboot"              -> resultOf("success", cmds.reboot())
-            else                  -> resultOf("error", "Unknown tool: $name")
+            "app_list"            -> resultMap("data", "Use pm list packages via adb/shizuku shell")
+            else                  -> resultOf("error", Result.failure(Exception("Unknown tool: $name")))
         }
     }
 
     private fun resultOf(key: String, result: Result<Any>): JSONObject {
         val r = JSONObject()
         result.onSuccess { r.put(key, it.toString()) }.onFailure { r.put("error", it.message ?: "Failed") }
+        return r
+    }
+
+    private fun resultMap(key: String, value: String): JSONObject {
+        val r = JSONObject()
+        r.put(key, value)
         return r
     }
 
@@ -239,7 +244,5 @@ class McpServer(private val port: Int, private val context: Context) {
             arrayOf("screenshot", "Take a screenshot", JSONObject("{}")),
             arrayOf("app_launch", "Launch an app by package name", JSONObject("{\"type\":\"object\",\"properties\":{\"package\":{\"type\":\"string\"}},\"required\":[\"package\"]}")),
             arrayOf("app_list", "List installed apps", JSONObject("{}")),
-            arrayOf("reboot", "Reboot the device (requires Shizuku)", JSONObject("{}")),
         )
-    }
 }
