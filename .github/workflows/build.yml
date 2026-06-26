@@ -1,7 +1,7 @@
 name: Build Hermes Control APK
 
 on:
-  workflow_dispatch:  # Manual trigger — just press a button!
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,10 +18,17 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build APK
+      - name: Generate Gradle Wrapper
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gradle 2>/dev/null || true
+          gradle wrapper --gradle-version 8.7
+
+      - name: Grant execute permission
+        run: chmod +x gradlew
+
+      - name: Build APK
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
