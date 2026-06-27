@@ -2,47 +2,27 @@ package com.hermes.control
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.IBinder
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
 
 /**
- * Execute shell commands via Shizuku using AIDL User Service.
- * Uses reflection so the class loads safely even without Shizuku installed.
+ * Execute shell commands via Shizuku.
+ * Uses reflection on Shizuku.newProcess() (private in v13).
  */
 class ShizukuShell(private val context: Context) {
 
-    private var shellService: IShellService? = null
-    private var bound = false
-    private var shizukuAvailable = false
-
-    private val serviceConnection = object : android.content.ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: android.os.IBinder?) {
-            shellService = IShellService.Stub.asInterface(binder)
-            bound = true
-        }
-
-        override fun onServiceDisconnected(name: ComponentName?) {
-            shellService = null
-            bound = false
-        }
-    }
-
-    /**
-     * Check if Shizuku is installed and running (via reflection).
-     */
     fun isShizukuAvailable(): Boolean {
         return try {
             val cls = Class.forName("rikka.shizuku.Shizuku")
             val method = cls.getMethod("pingBinder")
-            shizukuAvailable = method.invoke(null) as? Boolean ?: false
-            shizukuAvailable
+            method.invoke(null) as? Boolean ?: false
         } catch (e: Exception) {
-            shizukuAvailable = false
             false
         }
     }
 
-    /**
-     * Check if we have Shizuku permission (via reflection).
-     */
     fun hasPermission(): Boolean {
         return try {
             val cls = Class.forName("rikka.shizuku.Shizuku")
@@ -53,69 +33,123 @@ class ShizukuShell(private val context: Context) {
         }
     }
 
-    /**
-     * Bind to the shell service. Must be called before exec().
-     */
-    fun bind() {
-        if (bound) return
-        try {
-            val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
-            val argsClass = Class.forName("rikka.shizuku.Shizuku\$UserServiceArgs")
-
-            val constructor = argsClass.getConstructor(ComponentName::class.java)
-            val component = ComponentName(context.packageName, ShellService::class.java.name)
-            val args = constructor.newInstance(component)
-
-            // Chain: .daemon(false).processNameSuffix("shell").debuggable(true).version(1)
-            val daemonMethod = argsClass.getMethod("daemon", Boolean::class.javaPrimitiveType)
-            daemonMethod.invoke(args, false)
-            val suffixMethod = argsClass.getMethod("processNameSuffix", String::class.java)
-            suffixMethod.invoke(args, "shell")
-            val debugMethod = argsClass.getMethod("debuggable", Boolean::class.javaPrimitiveType)
-            debugMethod.invoke(args, true)
-            val versionMethod = argsClass.getMethod("version", Int::class.javaPrimitiveType)
-            versionMethod.invoke(args, 1)
-
-            // Shizuku.bindUserService(args, serviceConnection)
-            val bindMethod = shizukuClass.getMethod("bindUserService", argsClass, android.content.ServiceConnection::class.java)
-            bindMethod.invoke(null, args, serviceConnection)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    /**
-     * Execute a shell command via the Shizuku user service.
-     */
     fun exec(command: String, timeoutSeconds: Int = 30): String {
         if (!isShizukuAvailable()) return "Error: Shizuku is not running"
         if (!hasPermission()) return "Error: Shizuku permission not granted"
 
-        val service = shellService
-        if (service == null) {
-            bind()
-            return "Error: Shell service not connected yet. Retrying..."
-        }
-
         return try {
-            service.exec(command, timeoutSeconds)
+            // Try Shizuku.newProcess() via reflection (private in v13)
+            val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
+
+            // Try to find the method
+            val newProcessMethod = try {
+                shizukuClass.getDeclaredMethod(
+                    "newProcess",
+                    Array<String>::class.java,
+                    Array<String>::class.java,
+                    String::class.java
+                )
+            } catch (e: NoSuchMethodException) {
+                // Try alternative signature
+                shizukuClass.getDeclaredMethod(
+                    "newProcess",
+                    Array<String>::class.java,
+                    Array<String>::class.java,
+                    String::class.java,
+                    Boolean::class.javaPrimitiveType
+                )
+            }
+
+            newProcessMethod.isAccessible = true
+
+            val process = newProcessMethod.invoke(
+                null,
+                arrayOf("sh", "-c", command),
+                null,
+                null
+            )
+
+            if (process == null) {
+                return "Error: newProcess returned null"
+            }
+
+            // Read from the process - it should be a ShizukuRemoteProcess
+            // which extends Process
+            val processClass = process.javaClass
+
+            // Get inputStream via reflection
+            val inputStreamMethod = processClass.getMethod("getInputStream")
+            val inputStream = inputStreamMethod.invoke(process) as? java.io.InputStream
+                ?: return "Error: Could not get input stream"
+
+            val stdout = BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                val sb = StringBuilder()
+                val buffer = CharArray(4096)
+                var read: Int
+                while (reader.read(buffer).also { read = it } != -1) {
+                    sb.append(buffer, 0, read)
+                    if (sb.length > 102400) {
+                        sb.append("\n... (truncated)")
+                        break
+                    }
+                }
+                sb.toString()
+            }
+
+            // Get errorStream
+            val errorStreamMethod = processClass.getMethod("getErrorStream")
+            val errorStream = errorStreamMethod.invoke(process) as? java.io.InputStream
+            val stderr = if (errorStream != null) {
+                BufferedReader(InputStreamReader(errorStream)).use { reader ->
+                    val sb = StringBuilder()
+                    val buffer = CharArray(4096)
+                    var read: Int
+                    while (reader.read(buffer).also { read = it } != -1) {
+                        sb.append(buffer, 0, read)
+                        if (sb.length > 10240) break
+                    }
+                    sb.toString()
+                }
+            } else ""
+
+            // Wait for process
+            val waitForMethod = processClass.getMethod(
+                "waitFor", Long::class.javaPrimitiveType, TimeUnit::class.java
+            )
+            val finished = waitForMethod.invoke(process, timeoutSeconds.toLong(), TimeUnit.SECONDS) as? Boolean ?: false
+
+            if (!finished) {
+                try {
+                    val destroyMethod = processClass.getMethod("destroy")
+                    destroyMethod.invoke(process)
+                } catch (_: Exception) {}
+            }
+
+            val exitCode = if (finished) {
+                val exitMethod = processClass.getMethod("exitValue")
+                exitMethod.invoke(process) as? Int ?: -1
+            } else -99
+
+            buildString {
+                if (stdout.isNotBlank()) append(stdout)
+                if (stderr.isNotBlank()) {
+                    if (isNotEmpty()) append("\n")
+                    append("[stderr] ").append(stderr)
+                }
+                if (exitCode != 0) append("\n[exit:$exitCode]")
+            }
+
         } catch (e: Exception) {
-            bound = false
-            shellService = null
-            "Error: ${e.message}"
+            "Error: ${e.javaClass.simpleName}: ${e.message}"
         }
     }
 
-    /**
-     * Check Shizuku + service status.
-     */
     fun status(): String {
         val available = isShizukuAvailable()
         val permission = if (available) hasPermission() else false
         return buildString {
             appendLine("Shizuku: ${if (available) "RUNNING" else "NOT RUNNING"}")
             appendLine("Permission: ${if (permission) "GRANTED" else "NOT GRANTED"}")
-            appendLine("Service: ${if (bound) "CONNECTED" else "NOT CONNECTED"}")
         }
     }
 
