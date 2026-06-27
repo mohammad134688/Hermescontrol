@@ -8,43 +8,28 @@ import java.util.concurrent.Executors
 
 /**
  * File-based shell command bridge.
- * Uses app's external files dir (no permission needed) for IPC.
- * PRoot writes command → app executes via Shizuku → app writes output.
- * 
- * Files location: /sdcard/Android/data/com.hermes.control/files/
- * PRoot can access via: /sdcard/Android/data/com.hermes.control/files/
+ * Uses /sdcard/Download/ for IPC between PRoot and app.
+ * App must have WRITE_EXTERNAL_STORAGE or MANAGE_EXTERNAL_STORAGE permission.
  */
 class ShellBridge(private val context: Context) {
 
-    private val baseDir: File by lazy {
-        // App-specific external dir - no permission needed, accessible from PRoot
-        val dir = context.getExternalFilesDir(null) ?: context.filesDir
-        if (!dir.exists()) dir.mkdirs()
-        dir
-    }
+    private val baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+    private val cmdFile = File(baseDir, "hermes_cmd.txt")
+    private val outFile = File(baseDir, "hermes_out.txt")
+    private val lockFile = File(baseDir, "hermes_lock.txt")
 
-    private val cmdFile by lazy { File(baseDir, "hermes_cmd.txt") }
-    private val outFile by lazy { File(baseDir, "hermes_out.txt") }
-    private val lockFile by lazy { File(baseDir, "hermes_lock.txt") }
-
-    private val executor = Executors.newSingleThreadExecutor()
-    private var observer: FileObserver? = null
     private var running = false
     private var pollThread: Thread? = null
+    private var lastCmdTime = 0L
 
     fun start() {
         if (running) return
         running = true
 
-        // Create all files
-        ensureFile(cmdFile)
-        ensureFile(outFile)
-        ensureFile(lockFile)
+        ensureDir()
+        android.util.Log.d("ShellBridge", "Started. Files at: ${baseDir.absolutePath}")
 
-        // Log the path for debugging
-        android.util.Log.d("ShellBridge", "Bridge files at: ${baseDir.absolutePath}")
-
-        // Use polling instead of FileObserver (more reliable on FUSE)
+        // Poll for commands
         pollThread = Thread {
             while (running) {
                 try {
@@ -53,30 +38,20 @@ class ShellBridge(private val context: Context) {
                 } catch (_: InterruptedException) {
                     break
                 } catch (e: Exception) {
-                    android.util.Log.e("ShellBridge", "Poll error", e)
+                    android.util.Log.e("ShellBridge", "Error", e)
                 }
             }
-        }.apply { start() }
+        }.apply { isDaemon = true; start() }
     }
 
     fun stop() {
         running = false
-        observer?.stopWatching()
-        observer = null
         pollThread?.interrupt()
         pollThread = null
-        executor.shutdown()
     }
 
-    private fun ensureFile(file: File) {
-        try {
-            if (!file.exists()) {
-                file.parentFile?.mkdirs()
-                file.createNewFile()
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("ShellBridge", "Failed to create ${file.name}", e)
-        }
+    private fun ensureDir() {
+        if (!baseDir.exists()) baseDir.mkdirs()
     }
 
     private fun processCommand() {
@@ -86,20 +61,23 @@ class ShellBridge(private val context: Context) {
             val cmd = cmdFile.readText().trim()
             if (cmd.isEmpty()) return
 
-            // Clear command file
+            // Clear command
             cmdFile.writeText("")
+
+            android.util.Log.d("ShellBridge", "Executing: $cmd")
 
             // Execute via Shizuku
             val shell = ShizukuShell(context)
             val output = shell.exec(cmd, 30)
 
+            android.util.Log.d("ShellBridge", "Output length: ${output.length}")
+
             // Write output
             outFile.writeText(output)
-
-            // Write lock to signal completion
             lockFile.writeText("done")
 
         } catch (e: Exception) {
+            android.util.Log.e("ShellBridge", "Process error", e)
             try {
                 outFile.writeText("Error: ${e.message}")
                 lockFile.writeText("error")

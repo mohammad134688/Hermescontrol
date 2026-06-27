@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.view.View
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -47,6 +48,7 @@ class MainActivity : AppCompatActivity() {
 
         initViews()
         setupWebView()
+        requestStoragePermission()
         startMcpServer()
         setupControls()
 
@@ -68,6 +70,33 @@ class MainActivity : AppCompatActivity() {
         torchSwitch = findViewById(R.id.torchSwitch)
 
         webUiUrlInput.setText("http://127.0.0.1:9119")
+    }
+
+    private fun requestStoragePermission() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Android 11+ - need MANAGE_EXTERNAL_STORAGE
+                if (!Environment.isExternalStorageManager()) {
+                    val intent = android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        android.net.Uri.parse("package:$packageName")
+                    )
+                    startActivity(intent)
+                }
+            } else {
+                // Android 10 and below
+                if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != 0) {
+                    requestPermissions(
+                        arrayOf(
+                            android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                            android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                        ), 2001
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Storage permission error", e)
+        }
     }
 
     private fun trySetupShizuku() {
