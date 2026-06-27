@@ -27,8 +27,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webUiUrlInput: TextInputEditText
     private lateinit var brightnessSlider: android.widget.SeekBar
     private lateinit var brightnessValueText: android.widget.TextView
-    private lateinit var wifiSwitch: android.widget.Switch
-    private lateinit var torchSwitch: android.widget.Switch
+    private lateinit var wifiSwitch: androidx.appcompat.widget.SwitchCompat
+    private lateinit var torchSwitch: androidx.appcompat.widget.SwitchCompat
 
     private var mcpPort = 9199
     private var mcpServer: McpServer? = null
