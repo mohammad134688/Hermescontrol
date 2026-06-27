@@ -16,7 +16,7 @@ import java.io.InputStreamReader
 class McpCommands(private val context: Context) {
 
     // Shizuku shell instance - lazy to avoid crash if Shizuku not installed
-    private val shizuku by lazy { ShizukuShell(context).also { it.bind() } }
+    private val shizuku by lazy { ShizukuShell(context) }
 
     fun getBrightness(): Result<Int> = runCatching {
         Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS)
