@@ -47,6 +47,15 @@
             android:exported="false"
             android:foregroundServiceType="specialUse" />
 
+        <!-- Shell broadcast receiver for PRoot access -->
+        <receiver
+            android:name=".ShellReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.hermes.control.EXEC" />
+            </intent-filter>
+        </receiver>
+
         <!-- Shell content provider for PRoot access -->
         <provider
             android:name=".ShellContentProvider"
