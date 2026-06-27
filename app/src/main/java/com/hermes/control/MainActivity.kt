@@ -54,6 +54,9 @@ class MainActivity : AppCompatActivity() {
 
         mcpStatusText.text = "✅ MCP running on :$mcpPort"
 
+        // Start foreground service to stay alive
+        HermesService.start(this)
+
         // Try Shizuku AFTER everything else is ready
         trySetupShizuku()
     }
