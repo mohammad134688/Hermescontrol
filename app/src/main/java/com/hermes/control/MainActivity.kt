@@ -17,7 +17,6 @@ import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import rikka.shizuku.Shizuku
 
 class MainActivity : AppCompatActivity() {
 
@@ -35,8 +34,11 @@ class MainActivity : AppCompatActivity() {
     private var mcpServer: McpServer? = null
     private val scope = CoroutineScope(Dispatchers.IO)
 
-    // Shizuku
-    private var shizukuAvailable = false
+    // Shizuku - all lazy, never crash the app
+    private var shizukuInitialized = false
+    private var binderReceivedListener: Any? = null
+    private var binderDeadListener: Any? = null
+    private var permissionListener: Any? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,11 +46,13 @@ class MainActivity : AppCompatActivity() {
 
         initViews()
         setupWebView()
-        setupShizuku()
         startMcpServer()
         setupControls()
 
         mcpStatusText.text = "✅ MCP running on :$mcpPort"
+
+        // Try Shizuku AFTER everything else is ready
+        trySetupShizuku()
     }
 
     private fun initViews() {
@@ -65,62 +69,103 @@ class MainActivity : AppCompatActivity() {
         webUiUrlInput.setText("http://127.0.0.1:9119")
     }
 
-    private fun setupShizuku() {
+    private fun trySetupShizuku() {
         try {
-            // Check if Shizuku is available
-            shizukuAvailable = Shizuku.pingBinder()
+            // Check if Shizuku class is even loadable
+            val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
 
-            // Add binder received listener
-            Shizuku.addBinderReceivedListener(shizukuBinderReceivedListener)
-            Shizuku.addBinderDeadListener(shizukuBinderDeadListener)
-            Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
+            // Check if binder is already available
+            val pingBinder = shizukuClass.getMethod("pingBinder")
+            val available = pingBinder.invoke(null) as? Boolean ?: false
 
-            if (shizukuAvailable) {
-                // Check permission
-                if (Shizuku.checkSelfPermission() != 0) {
-                    Shizuku.requestPermission(1001)
-                }
+            if (available) {
+                tryRequestPermission(shizukuClass)
                 updateShizukuStatus("✅ Shizuku connected")
             } else {
-                updateShizukuStatus("⚠️ Shizuku not running")
+                updateShizukuStatus("⏳ Waiting for Shizuku...")
             }
+
+            // Register listeners safely
+            setupShizukuListeners(shizukuClass)
+            shizukuInitialized = true
+
+        } catch (e: ClassNotFoundException) {
+            updateShizukuStatus("⚠️ Shizuku not installed")
         } catch (e: Exception) {
-            shizukuAvailable = false
-            updateShizukuStatus("❌ Shizuku not installed")
+            updateShizukuStatus("⚠️ Shizuku: ${e.message?.take(30)}")
         }
     }
 
-    private val shizukuBinderReceivedListener = Shizuku.OnBinderReceivedListener {
-        shizukuAvailable = true
-        runOnUiThread {
-            updateShizukuStatus("✅ Shizuku connected")
-        }
-        if (Shizuku.checkSelfPermission() != 0) {
-            Shizuku.requestPermission(1001)
-        }
-    }
+    private fun setupShizukuListeners(shizukuClass: Class<*>) {
+        try {
+            val binderReceivedClass = Class.forName("rikka.shizuku.Shizuku\$OnBinderReceivedListener")
+            val binderDeadClass = Class.forName("rikka.shizuku.Shizuku\$OnBinderDeadListener")
+            val permResultClass = Class.forName("rikka.shizuku.Shizuku\$OnRequestPermissionResultListener")
 
-    private val shizukuBinderDeadListener = Shizuku.OnBinderDeadListener {
-        shizukuAvailable = false
-        runOnUiThread {
-            updateShizukuStatus("❌ Shizuku disconnected")
-        }
-    }
-
-    private val shizukuPermissionListener =
-        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
-            val granted = grantResult == 0
-            runOnUiThread {
-                updateShizukuStatus(if (granted) "✅ Shizuku ready (ADB access)" else "❌ Shizuku permission denied")
-                if (!granted) {
-                    Toast.makeText(this, "Shizuku permission needed for shell commands", Toast.LENGTH_LONG).show()
-                }
+            // Create listener instances via proxy
+            val binderReceived = java.lang.reflect.Proxy.newProxyInstance(
+                shizukuClass.classLoader,
+                arrayOf(binderReceivedClass)
+            ) { _, _, _ ->
+                runOnUiThread { updateShizukuStatus("✅ Shizuku connected") }
+                null
             }
+
+            val binderDead = java.lang.reflect.Proxy.newProxyInstance(
+                shizukuClass.classLoader,
+                arrayOf(binderDeadClass)
+            ) { _, _, _ ->
+                runOnUiThread { updateShizukuStatus("❌ Shizuku disconnected") }
+                null
+            }
+
+            val permResult = java.lang.reflect.Proxy.newProxyInstance(
+                shizukuClass.classLoader,
+                arrayOf(permResultClass)
+            ) { _, method, args ->
+                if (method?.name == "onRequestPermissionResult") {
+                    val granted = (args?.get(1) as? Int) == 0
+                    runOnUiThread {
+                        updateShizukuStatus(if (granted) "✅ Shizuku ready (ADB)" else "❌ Permission denied")
+                    }
+                }
+                null
+            }
+
+            // Register listeners via reflection
+            val addMethod1 = shizukuClass.getMethod("addBinderReceivedListener", binderReceivedClass)
+            addMethod1.invoke(null, binderReceived)
+
+            val addMethod2 = shizukuClass.getMethod("addBinderDeadListener", binderDeadClass)
+            addMethod2.invoke(null, binderDead)
+
+            val addMethod3 = shizukuClass.getMethod("addRequestPermissionResultListener", permResultClass)
+            addMethod3.invoke(null, permResult)
+
+            binderReceivedListener = binderReceived
+            binderDeadListener = binderDead
+            permissionListener = permResult
+
+        } catch (e: Exception) {
+            // Listeners optional - app works without them
         }
+    }
+
+    private fun tryRequestPermission(shizukuClass: Class<*>) {
+        try {
+            val checkPerm = shizukuClass.getMethod("checkSelfPermission")
+            val result = checkPerm.invoke(null) as? Int ?: -1
+            if (result != 0) {
+                val reqPerm = shizukuClass.getMethod("requestPermission", Int::class.javaPrimitiveType)
+                reqPerm.invoke(null, 1001)
+            }
+        } catch (_: Exception) {}
+    }
 
     private fun updateShizukuStatus(status: String) {
-        val mcpText = "✅ MCP on :$mcpPort | $status"
-        mcpStatusText.text = mcpText
+        runOnUiThread {
+            mcpStatusText.text = "✅ MCP on :$mcpPort | $status"
+        }
     }
 
     private fun setupWebView() {
@@ -229,11 +274,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        // Cleanup Shizuku listeners
+        // Cleanup Shizuku listeners via reflection
         try {
-            Shizuku.removeBinderReceivedListener(shizukuBinderReceivedListener)
-            Shizuku.removeBinderDeadListener(shizukuBinderDeadListener)
-            Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
+            val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
+            binderReceivedListener?.let {
+                val m = shizukuClass.getMethod("removeBinderReceivedListener", it.javaClass.interfaces[0])
+                m.invoke(null, it)
+            }
+            binderDeadListener?.let {
+                val m = shizukuClass.getMethod("removeBinderDeadListener", it.javaClass.interfaces[0])
+                m.invoke(null, it)
+            }
+            permissionListener?.let {
+                val m = shizukuClass.getMethod("removeRequestPermissionResultListener", it.javaClass.interfaces[0])
+                m.invoke(null, it)
+            }
         } catch (_: Exception) {}
 
         mcpServer?.stop()

@@ -2,29 +2,21 @@ package com.hermes.control
 
 import android.content.ComponentName
 import android.content.Context
-import android.content.ServiceConnection
-import android.os.IBinder
-import rikka.shizuku.Shizuku
 
 /**
  * Execute shell commands via Shizuku using AIDL User Service.
- * The ShellService runs in Shizuku's process with ADB-level privileges.
+ * Uses reflection so the class loads safely even without Shizuku installed.
  */
 class ShizukuShell(private val context: Context) {
 
     private var shellService: IShellService? = null
     private var bound = false
-    private var pendingCallback: ((String) -> Unit)? = null
+    private var shizukuAvailable = false
 
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+    private val serviceConnection = object : android.content.ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: android.os.IBinder?) {
             shellService = IShellService.Stub.asInterface(binder)
             bound = true
-            // Execute any pending command
-            pendingCallback?.let { cb ->
-                pendingCallback = null
-                cb("connected")
-            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -34,22 +26,28 @@ class ShizukuShell(private val context: Context) {
     }
 
     /**
-     * Check if Shizuku is installed and running.
+     * Check if Shizuku is installed and running (via reflection).
      */
     fun isShizukuAvailable(): Boolean {
         return try {
-            Shizuku.pingBinder()
+            val cls = Class.forName("rikka.shizuku.Shizuku")
+            val method = cls.getMethod("pingBinder")
+            shizukuAvailable = method.invoke(null) as? Boolean ?: false
+            shizukuAvailable
         } catch (e: Exception) {
+            shizukuAvailable = false
             false
         }
     }
 
     /**
-     * Check if we have Shizuku permission.
+     * Check if we have Shizuku permission (via reflection).
      */
     fun hasPermission(): Boolean {
         return try {
-            Shizuku.checkSelfPermission() == 0
+            val cls = Class.forName("rikka.shizuku.Shizuku")
+            val method = cls.getMethod("checkSelfPermission")
+            (method.invoke(null) as? Int) == 0
         } catch (e: Exception) {
             false
         }
@@ -57,43 +55,37 @@ class ShizukuShell(private val context: Context) {
 
     /**
      * Bind to the shell service. Must be called before exec().
-     * Returns immediately; service connects async.
      */
     fun bind() {
         if (bound) return
         try {
-            val args = Shizuku.UserServiceArgs(
-                ComponentName(context.packageName, ShellService::class.java.name)
-            )
-                .daemon(false)
-                .processNameSuffix("shell")
-                .debuggable(true)
-                .version(1)
+            val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
+            val argsClass = Class.forName("rikka.shizuku.Shizuku\$UserServiceArgs")
 
-            Shizuku.bindUserService(args, serviceConnection)
+            val constructor = argsClass.getConstructor(ComponentName::class.java)
+            val component = ComponentName(context.packageName, ShellService::class.java.name)
+            val args = constructor.newInstance(component)
+
+            // Chain: .daemon(false).processNameSuffix("shell").debuggable(true).version(1)
+            val daemonMethod = argsClass.getMethod("daemon", Boolean::class.javaPrimitiveType)
+            daemonMethod.invoke(args, false)
+            val suffixMethod = argsClass.getMethod("processNameSuffix", String::class.java)
+            suffixMethod.invoke(args, "shell")
+            val debugMethod = argsClass.getMethod("debuggable", Boolean::class.javaPrimitiveType)
+            debugMethod.invoke(args, true)
+            val versionMethod = argsClass.getMethod("version", Int::class.javaPrimitiveType)
+            versionMethod.invoke(args, 1)
+
+            // Shizuku.bindUserService(args, serviceConnection)
+            val bindMethod = shizukuClass.getMethod("bindUserService", argsClass, android.content.ServiceConnection::class.java)
+            bindMethod.invoke(null, args, serviceConnection)
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
     /**
-     * Unbind from the shell service.
-     */
-    fun unbind() {
-        try {
-            if (bound) {
-                Shizuku.unbindUserService(Shizuku.UserServiceArgs(
-                    ComponentName(context.packageName, ShellService::class.java.name)
-                ), serviceConnection, true)
-            }
-        } catch (_: Exception) {}
-        bound = false
-        shellService = null
-    }
-
-    /**
      * Execute a shell command via the Shizuku user service.
-     * Returns the command output as a string.
      */
     fun exec(command: String, timeoutSeconds: Int = 30): String {
         if (!isShizukuAvailable()) return "Error: Shizuku is not running"
@@ -108,7 +100,6 @@ class ShizukuShell(private val context: Context) {
         return try {
             service.exec(command, timeoutSeconds)
         } catch (e: Exception) {
-            // Service might have died, unbind and retry
             bound = false
             shellService = null
             "Error: ${e.message}"
@@ -129,12 +120,11 @@ class ShizukuShell(private val context: Context) {
     }
 
     companion object {
-        /**
-         * Request Shizuku permission. Call from Activity.
-         */
         fun requestPermission() {
             try {
-                Shizuku.requestPermission(1001)
+                val cls = Class.forName("rikka.shizuku.Shizuku")
+                val method = cls.getMethod("requestPermission", Int::class.javaPrimitiveType)
+                method.invoke(null, 1001)
             } catch (_: Exception) {}
         }
     }
