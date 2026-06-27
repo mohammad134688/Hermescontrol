@@ -16,7 +16,7 @@ import java.io.InputStreamReader
 class McpCommands(private val context: Context) {
 
     // Shizuku shell instance
-    private val shizuku = ShizukuShell()
+    private val shizuku = ShizukuShell(context).also { it.bind() }
 
     fun getBrightness(): Result<Int> = runCatching {
         Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS)
@@ -78,7 +78,7 @@ IP: ${info.ipAddress}"""
 
     fun getBatteryStatus(): Result<String> = runCatching {
         val intent = context.registerReceiver(null,
-            Intent(Intent.ACTION_BATTERY_CHANGED))
+            android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level = intent?.getIntExtra("level", -1) ?: -1
         val scale = intent?.getIntExtra("scale", -1) ?: -1
         val plugged = intent?.getIntExtra("plugged", 0) ?: 0
@@ -138,8 +138,7 @@ Charging: $charging"""
      * Execute a shell command via Shizuku (ADB-level access).
      */
     fun shellExec(command: String, timeout: Long = 30): Result<String> = runCatching {
-        val output = shizuku.execFormatted(command, timeout)
-        output
+        shizuku.exec(command, timeout.toInt())
     }
 
     /**
