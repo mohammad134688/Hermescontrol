@@ -8,8 +8,7 @@ import java.util.concurrent.Executors
 
 /**
  * File-based shell command bridge.
- * Uses /sdcard/Download/ for IPC between PRoot and app.
- * App must have WRITE_EXTERNAL_STORAGE or MANAGE_EXTERNAL_STORAGE permission.
+ * App creates files → PRoot writes command → app executes → writes output.
  */
 class ShellBridge(private val context: Context) {
 
@@ -20,26 +19,17 @@ class ShellBridge(private val context: Context) {
 
     private var running = false
     private var pollThread: Thread? = null
-    private var lastCmdTime = 0L
 
     fun start() {
         if (running) return
         running = true
 
-        ensureDir()
-        
-        // Debug: write marker to prove we can access the directory
-        try {
-            val marker = File(baseDir, "hermes_bridge_marker.txt")
-            marker.writeText("ShellBridge started at ${System.currentTimeMillis()}")
-            marker.setReadable(true, false)
-            marker.setWritable(true, false)
-            android.util.Log.d("ShellBridge", "Marker written: ${marker.absolutePath}")
-        } catch (e: Exception) {
-            android.util.Log.e("ShellBridge", "CANNOT WRITE to ${baseDir.absolutePath}", e)
-        }
+        // Create ALL files so we own them and PRoot can write to them
+        createFile(cmdFile, "")
+        createFile(outFile, "")
+        createFile(lockFile, "ready")
 
-        android.util.Log.d("ShellBridge", "Started. Files at: ${baseDir.absolutePath}")
+        android.util.Log.d("ShellBridge", "Started at ${baseDir.absolutePath}")
 
         // Poll for commands
         pollThread = Thread {
@@ -62,8 +52,20 @@ class ShellBridge(private val context: Context) {
         pollThread = null
     }
 
-    private fun ensureDir() {
-        if (!baseDir.exists()) baseDir.mkdirs()
+    private fun createFile(file: File, initialContent: String) {
+        try {
+            if (!file.exists()) {
+                file.parentFile?.mkdirs()
+                file.createNewFile()
+            }
+            file.setReadable(true, false)
+            file.setWritable(true, false)
+            if (initialContent.isNotEmpty()) {
+                file.writeText(initialContent)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ShellBridge", "Failed to create ${file.name}: ${e.message}")
+        }
     }
 
     private fun processCommand() {
@@ -82,14 +84,14 @@ class ShellBridge(private val context: Context) {
             val shell = ShizukuShell(context)
             val output = shell.exec(cmd, 30)
 
-            android.util.Log.d("ShellBridge", "Output length: ${output.length}")
+            android.util.Log.d("ShellBridge", "Done: ${output.take(50)}")
 
             // Write output
             outFile.writeText(output)
             lockFile.writeText("done")
 
         } catch (e: Exception) {
-            android.util.Log.e("ShellBridge", "Process error", e)
+            android.util.Log.e("ShellBridge", "Process error: ${e.message}")
             try {
                 outFile.writeText("Error: ${e.message}")
                 lockFile.writeText("error")
