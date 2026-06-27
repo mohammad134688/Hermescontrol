@@ -47,6 +47,13 @@
             android:exported="false"
             android:foregroundServiceType="specialUse" />
 
+        <!-- Shell content provider for PRoot access -->
+        <provider
+            android:name=".ShellContentProvider"
+            android:authorities="com.hermes.control.shell"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+
         <!-- Shizuku provider -->
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
