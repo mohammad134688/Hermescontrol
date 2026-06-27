@@ -11,10 +11,12 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 
 /**
- * System commands using standard Android APIs (no Shizuku needed).
- * Falls back gracefully when permissions are missing.
+ * System commands using standard Android APIs + Shizuku shell access.
  */
 class McpCommands(private val context: Context) {
+
+    // Shizuku shell instance
+    private val shizuku = ShizukuShell()
 
     fun getBrightness(): Result<Int> = runCatching {
         Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS)
@@ -29,6 +31,21 @@ class McpCommands(private val context: Context) {
         val mode = if (enabled) 1 else 0
         Settings.System.putInt(context.contentResolver,
             Settings.System.SCREEN_BRIGHTNESS_MODE, mode)
+    }
+
+    fun getVolumes(): Result<String> = runCatching {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val streams = mapOf(
+            "music" to android.media.AudioManager.STREAM_MUSIC,
+            "ring" to android.media.AudioManager.STREAM_RING,
+            "notification" to android.media.AudioManager.STREAM_NOTIFICATION,
+            "alarm" to android.media.AudioManager.STREAM_ALARM,
+            "call" to android.media.AudioManager.STREAM_VOICE_CALL,
+            "system" to android.media.AudioManager.STREAM_SYSTEM,
+        )
+        streams.entries.joinToString("\n") { (name, stream) ->
+            "$name: ${audioManager.getStreamVolume(stream)}/${audioManager.getStreamMaxVolume(stream)}"
+        }
     }
 
     fun setVolume(stream: String, level: Int): Result<Unit> = runCatching {
@@ -111,5 +128,37 @@ Charging: $charging"""
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }
+    }
+
+    // ==========================================
+    // Shizuku Shell Commands
+    // ==========================================
+
+    /**
+     * Execute a shell command via Shizuku (ADB-level access).
+     */
+    fun shellExec(command: String, timeout: Long = 30): Result<String> = runCatching {
+        val output = shizuku.execFormatted(command, timeout)
+        output
+    }
+
+    /**
+     * Check Shizuku status.
+     */
+    fun shizukuStatus(): Result<String> = runCatching {
+        val available = shizuku.isShizukuAvailable()
+        val permission = if (available) shizuku.hasPermission() else false
+        buildString {
+            appendLine("Shizuku: ${if (available) "RUNNING" else "NOT RUNNING"}")
+            appendLine("Permission: ${if (permission) "GRANTED" else "NOT GRANTED"}")
+        }
+    }
+
+    /**
+     * Request Shizuku permission.
+     */
+    fun shizukuRequestPermission(): Result<String> = runCatching {
+        ShizukuShell.requestPermission()
+        "Permission request sent"
     }
 }

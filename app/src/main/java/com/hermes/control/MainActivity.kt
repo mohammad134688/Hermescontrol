@@ -17,6 +17,7 @@ import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import rikka.shizuku.Shizuku
 
 class MainActivity : AppCompatActivity() {
 
@@ -34,12 +35,16 @@ class MainActivity : AppCompatActivity() {
     private var mcpServer: McpServer? = null
     private val scope = CoroutineScope(Dispatchers.IO)
 
+    // Shizuku
+    private var shizukuAvailable = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         initViews()
         setupWebView()
+        setupShizuku()
         startMcpServer()
         setupControls()
 
@@ -60,6 +65,64 @@ class MainActivity : AppCompatActivity() {
         webUiUrlInput.setText("http://127.0.0.1:9119")
     }
 
+    private fun setupShizuku() {
+        try {
+            // Check if Shizuku is available
+            shizukuAvailable = Shizuku.pingBinder()
+
+            // Add binder received listener
+            Shizuku.addBinderReceivedListener(shizukuBinderReceivedListener)
+            Shizuku.addBinderDeadListener(shizukuBinderDeadListener)
+            Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
+
+            if (shizukuAvailable) {
+                // Check permission
+                if (Shizuku.checkSelfPermission() != 0) {
+                    Shizuku.requestPermission(1001)
+                }
+                updateShizukuStatus("✅ Shizuku connected")
+            } else {
+                updateShizukuStatus("⚠️ Shizuku not running")
+            }
+        } catch (e: Exception) {
+            shizukuAvailable = false
+            updateShizukuStatus("❌ Shizuku not installed")
+        }
+    }
+
+    private val shizukuBinderReceivedListener = Shizuku.OnBinderReceivedListener {
+        shizukuAvailable = true
+        runOnUiThread {
+            updateShizukuStatus("✅ Shizuku connected")
+        }
+        if (Shizuku.checkSelfPermission() != 0) {
+            Shizuku.requestPermission(1001)
+        }
+    }
+
+    private val shizukuBinderDeadListener = Shizuku.OnBinderDeadListener {
+        shizukuAvailable = false
+        runOnUiThread {
+            updateShizukuStatus("❌ Shizuku disconnected")
+        }
+    }
+
+    private val shizukuPermissionListener =
+        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+            val granted = grantResult == 0
+            runOnUiThread {
+                updateShizukuStatus(if (granted) "✅ Shizuku ready (ADB access)" else "❌ Shizuku permission denied")
+                if (!granted) {
+                    Toast.makeText(this, "Shizuku permission needed for shell commands", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
+    private fun updateShizukuStatus(status: String) {
+        val mcpText = "✅ MCP on :$mcpPort | $status"
+        mcpStatusText.text = mcpText
+    }
+
     private fun setupWebView() {
         webView.settings.apply {
             javaScriptEnabled = true
@@ -75,7 +138,7 @@ class MainActivity : AppCompatActivity() {
                 safeBrowsingEnabled = false
             }
             userAgentString = "Mozilla/5.0 (Linux; Android ${Build.VERSION.RELEASE}) " +
-                    "AppleWebKit/537.36 HermesControl/1.0"
+                    "AppleWebKit/537.36 HermesControl/2.0"
         }
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
@@ -166,6 +229,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // Cleanup Shizuku listeners
+        try {
+            Shizuku.removeBinderReceivedListener(shizukuBinderReceivedListener)
+            Shizuku.removeBinderDeadListener(shizukuBinderDeadListener)
+            Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
+        } catch (_: Exception) {}
+
         mcpServer?.stop()
         super.onDestroy()
     }

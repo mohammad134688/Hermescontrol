@@ -98,7 +98,7 @@ class McpServer(private val port: Int, private val context: Context) {
     private fun handleGet(): String {
         val info = JSONObject()
         info.put("name", "Hermes Android App MCP")
-        info.put("version", "1.0.0")
+        info.put("version", "2.0.0")
         info.put("tools", getToolDefinitions().length())
         return info.toString()
     }
@@ -115,7 +115,7 @@ class McpServer(private val port: Int, private val context: Context) {
                     result.put("protocolVersion", "2025-03-26")
                     val serverInfo = JSONObject()
                     serverInfo.put("name", "Hermes Android App MCP")
-                    serverInfo.put("version", "1.0.0")
+                    serverInfo.put("version", "2.0.0")
                     result.put("serverInfo", serverInfo)
                     val caps = JSONObject()
                     caps.put("tools", JSONObject())
@@ -182,6 +182,10 @@ class McpServer(private val port: Int, private val context: Context) {
             "screenshot"          -> resultMap("error", "Use termux-screenshot via MCP python server")
             "app_launch"          -> resultOf("success", cmds.launchApp(args.optString("package", "")))
             "app_list"            -> resultMap("data", "Use pm list packages via adb/shizuku shell")
+            // Shizuku shell commands
+            "shell_exec"          -> mapResult(cmds.shellExec(args.optString("command", "echo hello"), args.optLong("timeout", 30)))
+            "shizuku_status"      -> mapResult(cmds.shizukuStatus())
+            "shizuku_permission"  -> mapResult(cmds.shizukuRequestPermission())
             else                  -> resultOf("error", Result.failure(Exception("Unknown tool: $name")))
         }
     }
@@ -244,5 +248,10 @@ class McpServer(private val port: Int, private val context: Context) {
             arrayOf("screenshot", "Take a screenshot", JSONObject("{}")),
             arrayOf("app_launch", "Launch an app by package name", JSONObject("{\"type\":\"object\",\"properties\":{\"package\":{\"type\":\"string\"}},\"required\":[\"package\"]}")),
             arrayOf("app_list", "List installed apps", JSONObject("{}")),
+            // Shizuku shell tools
+            arrayOf("shell_exec", "Execute shell command via Shizuku (ADB access)", JSONObject("{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"description\":\"Shell command to execute\"},\"timeout\":{\"type\":\"integer\",\"description\":\"Timeout in seconds (default 30)\"}},\"required\":[\"command\"]}")),
+            arrayOf("shizuku_status", "Check Shizuku availability and permission status", JSONObject("{}")),
+            arrayOf("shizuku_permission", "Request Shizuku permission", JSONObject("{}")),
         )
+    }
 }
