@@ -27,6 +27,18 @@ class ShellBridge(private val context: Context) {
         running = true
 
         ensureDir()
+        
+        // Debug: write marker to prove we can access the directory
+        try {
+            val marker = File(baseDir, "hermes_bridge_marker.txt")
+            marker.writeText("ShellBridge started at ${System.currentTimeMillis()}")
+            marker.setReadable(true, false)
+            marker.setWritable(true, false)
+            android.util.Log.d("ShellBridge", "Marker written: ${marker.absolutePath}")
+        } catch (e: Exception) {
+            android.util.Log.e("ShellBridge", "CANNOT WRITE to ${baseDir.absolutePath}", e)
+        }
+
         android.util.Log.d("ShellBridge", "Started. Files at: ${baseDir.absolutePath}")
 
         // Poll for commands
