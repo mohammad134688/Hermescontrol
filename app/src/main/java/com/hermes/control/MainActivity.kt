@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
 
     private var mcpPort = 9199
     private var mcpServer: McpServer? = null
+    private var shellBridge: ShellBridge? = null
     private val scope = CoroutineScope(Dispatchers.IO)
 
     // Shizuku - all lazy, never crash the app
@@ -216,6 +217,9 @@ class MainActivity : AppCompatActivity() {
     private fun startMcpServer() {
         mcpServer = McpServer(mcpPort, this)
         mcpServer?.start()
+        // Start file-based shell bridge for PRoot access
+        shellBridge = ShellBridge(this)
+        shellBridge?.start()
     }
 
     private fun setupControls() {
@@ -291,6 +295,7 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (_: Exception) {}
 
+        shellBridge?.stop()
         mcpServer?.stop()
         super.onDestroy()
     }
